@@ -140,6 +140,22 @@ r.upsert
 # => #<Vehicle id: 1, make: 'Ford', name: 'Focus', doors: 2>
 ```
 
+Partial indexes can be supported with the addition of a `where` clause.
+
+```ruby
+class Account < ApplicationRecord
+  upsert_keys :name, where: 'active is TRUE'
+end
+```
+
+Custom index can be handled with a Hash containing a literal key :
+
+```ruby
+class Account < ApplicationRecord
+  upsert_keys literal: 'md5(my_long_field)'
+end
+```
+
 ## Tests
 
 Make sure to have an upsert_test database:
@@ -165,3 +181,8 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/jesjos
 - Leon Miller-Out ([@sbleon](https://github.com/sbleon))
 - Andrii Dmytrenko ([@Antti](https://github.com/Antti))
 - Alexia McDonald ([@alexiamcdonald](https://github.com/alexiamcdonald))
+- Timo Schilling ([@timoschilling](https://github.com/timoschilling))
+- Benedikt Deicke ([@benedikt](https://github.com/benedikt))
+- Daniel Cooper ([@danielcooper](https://github.com/danielcooper))
+- Laurent Vallar ([@val](https://github.com/val))
+- Emmanuel Quentin ([@manuquentin](https://github.com/manuquentin))
