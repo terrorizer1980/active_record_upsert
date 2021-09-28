@@ -11,6 +11,16 @@ module ActiveRecord
         record.upsert
       end
 
+      it 'updates the attribute before calling after callbacks' do
+        MyRecord.create(id: 'some_id', name: 'Some name')
+
+        allow(record).to receive(:after_s) { expect(record.name).to eq('Some name') }
+        allow(record).to receive(:after_c) { expect(record.name).to eq('Some name') }
+        allow(record).to receive(:after_com) { expect(record.name).to eq('Some name') }
+
+        record.upsert
+      end
+
       context 'when the record does not exist' do
         it 'sets timestamps' do
           record.upsert
@@ -22,6 +32,12 @@ module ActiveRecord
           record = MyRecord.new(id: 25, name: 'Some name', wisdom: 3)
           record.upsert(attributes: [:id, :name])
           expect(record.reload.wisdom).to eq(3)
+        end
+
+        it 'clears any changes state on the instance' do
+          record.upsert
+          expect(record.changes).to be_empty
+          expect(record.changed?).to be false
         end
       end
 
@@ -49,11 +65,39 @@ module ActiveRecord
           expect(upserted.name).to eq('somename')
         end
 
+        it 'clears any changes' do
+          upserted = MyRecord.new(id: key, name: 'other')
+          upserted.upsert
+          expect(upserted.changes).to be_empty
+          expect(upserted.changed?).to be false
+        end
+
         context 'when specifying attributes' do
           it 'sets all the specified attributes' do
             upserted = MyRecord.new(id: key)
             upserted.upsert(attributes: [:id, :name])
             expect(upserted.name).to eq(nil)
+          end
+        end
+
+        context 'with opts' do
+          let(:attrs) { {make: 'Ford', name: 'Focus', year: 2017 } }
+          let!(:vehicle) { Vehicle.create(attrs) }
+
+          context 'with upsert_keys' do
+            it 'allows upsert_keys to be set when #upsert is called' do
+              upserted = Vehicle.new({ make: 'Volkswagen', name: 'Golf', year: attrs[:year] })
+              expect { upserted.upsert(opts: { upsert_keys: [:year] }) }.not_to change { Vehicle.count }.from(1)
+              expect(upserted.id).to eq(vehicle.id)
+            end
+          end
+
+          context 'with upsert_options' do
+            it 'allows upsert_options to be set when #upsert is called' do
+              upserted = Vehicle.new({ make: attrs[:make], name: 'GT', wheels_count: 4 })
+              expect { upserted.upsert(opts: { upsert_keys: [:make], upsert_options: { where: 'year IS NULL' } }) }.to change { Vehicle.count }.from(1).to(2)
+              expect(upserted.id).not_to eq(vehicle.id)
+            end
           end
         end
       end
@@ -103,6 +147,33 @@ module ActiveRecord
       end
     end
 
+    describe '#upsert_operation' do
+      let(:attributes) { { id: 1 } }
+
+      context 'when no upsert has been tried' do
+        it 'returns nil' do
+          record = MyRecord.new(attributes)
+          expect(record.upsert_operation).to_not be
+        end
+      end
+
+      context 'when the record does not exist' do
+        it 'returns create' do
+          record = MyRecord.upsert(attributes)
+          expect(record.upsert_operation).to eq(:create)
+        end
+      end
+
+      context 'when the record already exists' do
+        before { MyRecord.create(attributes) }
+
+        it 'returns update' do
+          record = MyRecord.upsert(attributes)
+          expect(record.upsert_operation).to eq(:update)
+        end
+      end
+    end
+
     describe '.upsert' do
       context 'when the record already exists' do
         let(:key) { 1 }
@@ -135,6 +206,36 @@ module ActiveRecord
             expect(existing.reload.updated_at).to be > existing_updated_at
           end
         end
+
+        context 'with opts' do
+          let(:attrs) { {make: 'Ford', name: 'Focus', year: 2017 } }
+          let!(:vehicle) { Vehicle.create(attrs) }
+
+          context 'with upsert_keys' do
+            it 'allows upsert_keys to be set when .upsert is called' do
+              expect { Vehicle.upsert({ make: 'Volkswagen', name: 'Golf', year: attrs[:year] }, opts: { upsert_keys: [:year] }) }.not_to change { Vehicle.count }.from(1)
+              expect(vehicle.reload.make).to eq('Volkswagen')
+            end
+          end
+
+          context 'with upsert_options' do
+            it 'allows upsert_options to be set when #upsert is called' do
+              expect { Vehicle.upsert({ make: attrs[:make], name: 'GT', wheels_count: 4 }, opts: { upsert_keys: [:make], upsert_options: { where: 'year IS NULL' } }) }.to change { Vehicle.count }.from(1).to(2)
+              expect(vehicle.reload.wheels_count).to be_nil
+            end
+          end
+        end
+      end
+
+      context 'with assocations' do
+        let!(:existing) { Vehicle.create!(make: 'Make', name: 'Name') }
+        let(:account) { Account.create! }
+
+        it 'updates the foreign keys' do
+          expect {
+            Vehicle.upsert!(make: existing.make, name: existing.name, account: account)
+          }.to change { existing.reload.account_id }.from(nil).to(account.id)
+        end
       end
 
       context 'when another index violation is made' do
@@ -142,6 +243,14 @@ module ActiveRecord
           record = MyRecord.create(name: 'somename', wisdom: 1)
           MyRecord.create(name: 'other', wisdom: 2)
           expect { MyRecord.upsert(id: record.id, wisdom: 2) }.to raise_error(ActiveRecord::RecordNotUnique)
+        end
+      end
+
+      context 'when updating attributes from the database' do
+        it 'does not call setter methods' do
+          record = MyRecord.new(name: 'somename', wisdom: 1)
+          expect(record).to_not receive(:name=).with('somename')
+          record.upsert
         end
       end
     end
